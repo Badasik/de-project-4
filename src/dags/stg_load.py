@@ -6,6 +6,7 @@ import logging
 from decimal import Decimal
 import requests
 import pymongo
+import json
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def download_mongo_to_staging(mongo_client,connect_to_db, collection_name, schem
     cursor_to_stg = connect_to_db.cursor()
     cursor_to_stg.execute(f"""SELECT coalesce(max(workflow_key),'2022-01-01 00:00:00.0') FROM {schema}.srv_etl_settings WHERE workflow_settings = '{table_name}';""")
     max_date = cursor_to_stg.fetchone()[0]
-    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S.%f')
+    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S')
     filter = {'update_ts': {'$gt': max_date}}
     sort = [('update_ts', -1)]
     docs = list(collection.find(filter=filter, sort=sort, limit=1000)) 
@@ -98,7 +99,7 @@ def download_mongo_to_staging(mongo_client,connect_to_db, collection_name, schem
         connect_to_db.commit()
     else:
         log.info('НОВЫЕ ЗАПИСИ ОТСУТСТВУЮТ')
-
+'''
 def delivery_data(data, max_date):
     values = []
     dates = []
@@ -113,7 +114,7 @@ def delivery_data(data, max_date):
         sum_delivey = row.get('sum')
         tip_sum = row.get('tip_sum')
         try:
-           a = datetime.strptime(order_ts, '%Y-%m-%d %H:%M:%S.%f')
+           a = datetime.strptime(order_ts, '%Y-%m-%d %H:%M:%S')
         except ValueError:
             a = datetime.strptime(order_ts, '%Y-%m-%d %H:%M:%S')
         if a > max_date:
@@ -164,6 +165,81 @@ def download_api_to_staging(host, connect_to_db, headers, schema, table):
             cursor_to_stg.execute(sql)
     connect_to_db.commit()
     log.info(f'Загрузка данных в таблицу {table} завершена')
+'''
+
+def load_couriers(file_api, offset, limit, DWH, current_date_string, yesterday_date_string, headers):
+
+    #Очищаем промежуточную таблицу
+    with psycopg2.connect(DWH) as conn:
+        cur = conn.cursor()
+        query = f"TRUNCATE TABLE stg.api_{file_api};"
+        print(query)
+        cur.execute(query)
+        conn.commit()
+
+    #Заполнение таблицы
+    while True:
+        url = f'https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/{file_api}?from={yesterday_date_string}&to={current_date_string}&limit={limit}&offset={offset}'
+        r = requests.get(url,headers=headers)
+        d = r.json()
+        data = str(d)
+        offset+=1
+
+        if len(d) > 1:
+            with psycopg2.connect(DWH) as conn:
+                cur = conn.cursor()
+                query = f"INSERT INTO stg.api_{file_api}(content) VALUES ('{json.dumps(d[0], ensure_ascii=False)}'::json)"
+                print(query)
+                cur.execute(query)
+                conn.commit()
+        if not d:
+            break
+
+    with psycopg2.connect(DWH) as conn:
+        cur = conn.cursor()
+        query = f"CALL Load_stg_{file_api}()"
+        print(query)
+        cur.execute(query)
+        conn.commit()       
+
+    return 200
+
+
+def load_deliveries (file_api, offset, limit, DWH, current_date_string, yesterday_date_string, headers):
+
+    #Очищаем промежуточную таблицу
+    with psycopg2.connect(DWH) as conn:
+        cur = conn.cursor()
+        query = f"TRUNCATE TABLE stg.api_{file_api};"
+        print(query)
+        cur.execute(query)
+        conn.commit()
+
+    #Заполнение таблицы
+    while True:
+        url = f'https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/{file_api}?from={yesterday_date_string}&to={current_date_string}&limit={limit}&offset={offset}'
+        r = requests.get(url,headers=headers)
+        d = r.json()
+        data = str(d)
+        offset+=1
+
+        if len(d) > 1:
+            with psycopg2.connect(DWH) as conn:
+                cur = conn.cursor()
+                query = f"INSERT INTO stg.api_{file_api}(content) VALUES ('{json.dumps(d[0], ensure_ascii=False)}'::json)"
+                print(query)
+                cur.execute(query)
+        if not d:
+            break
+
+        
+    with psycopg2.connect(DWH) as conn:
+        cur = conn.cursor()
+        query = f"CALL Load_stg_{file_api}()"
+        print(query)
+        cur.execute(query)
+        conn.commit()
+
 
 
 if __name__ == '__main__':

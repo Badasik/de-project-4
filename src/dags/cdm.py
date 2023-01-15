@@ -5,8 +5,9 @@ from airflow.operators.python import PythonOperator
 from airflow.models.xcom import XCom
 import logging
 import logging
-import Check
-from datetime import datetime
+from examples.stg.Check import check_and_create
+from datetime import datetime, date, timedelta
+
 
 
 ALL_CDM_TABLES = ['dm_settlement_report', 'dm_courier_ledger']
@@ -14,8 +15,11 @@ log = logging.getLogger(__name__)
 connect_to_db = psycopg2.connect("host=localhost port=5432 dbname=de user=jovyan password=jovyan")
 
 
+today = date.today()
+month_1 = today - timedelta(days=60)
+
 def check_database(connect_to_db=connect_to_db):
-    Check.check_and_create(connect_to_db,'cdm', ALL_CDM_TABLES)
+    check_and_create(connect_to_db,'cdm', ALL_CDM_TABLES)
 
 def courier_ledger(connect_to_db, cdm_table, delivery_table, timestamps_table, couriers_table):
     cursor = connect_to_db.cursor()
@@ -56,14 +60,14 @@ def courier_ledger(connect_to_db, cdm_table, delivery_table, timestamps_table, c
                     FROM dds.{delivery_table} dd
                     INNER JOIN dds.{timestamps_table} dt
                     ON dd.delivery_ts_id = dt.id
-                    where dt.month=(select date_part('month', (now()-interval '1 month')))
+                    where dt.month=(select {today} - {month_1})
                     and dt.ts > '{max_date}'
                     )
                     SELECT
                     dc.id as courier_id,
                     max(dc.courier_name) as courier_name,
-                    max(cte.year) as year,
-                    max(cte.month) as month,
+                    max(cte.year) as settlement_year,
+                    max(cte.month) as settlement_month,
                     count(1) as orders_count,
                     sum(cte.order_sum) as orders_total_sum,
                     avg(cte.rate) as rate_avg,
@@ -75,7 +79,17 @@ def courier_ledger(connect_to_db, cdm_table, delivery_table, timestamps_table, c
                     inner join dds.{couriers_table} dc
                     on cte.courier_id = dc.id
                     group by dc.id
-                    ;"""
+                    ON CONFLICT (courier_id, settlement_year, settlement_month) DO UPDATE SET courier_id = EXCLUDED.courier_id,
+                                                                                              courier_name = EXCLUDED.courier_name,
+                                                                                              settlement_year = EXCLUDED.settlement_year,
+                                                                                              settlement_month = EXCLUDED.settlement_month,
+                                                                                              orders_count = EXCLUDED.orders_count,
+                                                                                              orders_total_sum = EXCLUDED.orders_total_sum,
+                                                                                              rate_avg = EXCLUDED.rate_avg,
+                                                                                              order_processing_fee = EXCLUDED.order_processing_fee,
+                                                                                              courier_order_sum = EXCLUDED.courier_order_sum,
+                                                                                              courier_tips_sum = EXCLUDED.courier_tips_sum,
+                                                                                              courier_reward_sum = EXCLUDED.courier_reward_sum ;"""
     cursor.execute(insert_sql)
     cursor.execute(f"""INSERT INTO stg.srv_etl_settings as tbl (workflow_key, workflow_settings)
     VALUES (date_trunc('second', now()::timestamp),'{cdm_table}') ON CONFLICT (workflow_settings) DO UPDATE SET workflow_key = EXCLUDED.workflow_key;""")

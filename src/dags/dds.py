@@ -5,8 +5,8 @@ from airflow.operators.python import PythonOperator
 from airflow.models.xcom import XCom
 from datetime import datetime
 import logging
-import Check
-import dds_load
+from examples.stg.Check import check_and_create
+from examples.stg import dds_load
 
 ALL_DDS_TABLES = ['dm_users', 'dm_restaurants', 'dm_products', 'dm_timestamps', 'dm_orders', 'fct_product_sales', 'dm_couriers', 'dm_deliveries']
 
@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 connect_to_db = psycopg2.connect("host=localhost port=5432 dbname=de user=jovyan password=jovyan")
 
 def check_database(connect_to_db=connect_to_db):
-    Check.check_and_create(connect_to_db,'dds', ALL_DDS_TABLES)
+    check_and_create(connect_to_db,'dds', ALL_DDS_TABLES)
 
 def upload_restaurant_dds(connect_to_db, dds_table, stg_table):
     dds_load.upload_restaurant(connect_to_db=connect_to_db,dds_table=dds_table,stg_table=stg_table)

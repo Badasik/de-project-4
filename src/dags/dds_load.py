@@ -14,7 +14,7 @@ def upload_restaurant(connect_to_db, dds_table, stg_table):
     max_date_query = f"""SELECT coalesce(max(workflow_key),'2022-01-01 00:00:00.0') FROM stg.srv_etl_settings WHERE workflow_settings = '{dds_table}';"""
     cursor.execute(max_date_query)
     max_date = cursor.fetchone()[0]
-    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S.%f')
+    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S')
     row_select = f"""SELECT * FROM stg.ordersystem_restaurants WHERE update_ts > '{max_date}';"""
     cursor.execute(row_select)
     data = cursor.fetchall()
@@ -122,7 +122,7 @@ def upload_dm_products(connect_to_db, dds_table, restaurant_table, stg_table):
     max_date_query = f"""SELECT coalesce(max(workflow_key),'2022-01-01 00:00:00.0') FROM stg.srv_etl_settings WHERE workflow_settings = '{dds_table}';"""
     cursor.execute(max_date_query)
     max_date = cursor.fetchone()[0]
-    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S.%f')
+    max_date = datetime.strptime(max_date, '%Y-%m-%d %H:%M:%S')
     cursor.execute(f"""SELECT * FROM stg.{stg_table} WHERE update_ts > '{max_date}';""")
     restoraunt_data = cursor.fetchall()
     new_dates = []

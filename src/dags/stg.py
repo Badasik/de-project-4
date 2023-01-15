@@ -2,25 +2,44 @@ from typing import List
 from urllib.parse import quote_plus as quote
 from pymongo.mongo_client import MongoClient
 import pymongo
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from airflow import DAG
 import psycopg2
 from airflow.operators.python import PythonOperator
 from airflow.models.xcom import XCom
 import logging
 import logging
-import Check
-import stg_load
+from examples.stg.Check import check_and_create
+from examples.stg import stg_load
 
 log = logging.getLogger(__name__)
 
 
+
+
+#Текущая дата для выгрузки
+today = date.today()
+current_date = str(date.today())
+current_date_string = current_date + ' 00:00:00'
+
+#Вчерашняя дата для выгрузки
+yesterday_date = date.today() - timedelta(1)
+yesterday_date_string = str(yesterday_date) + ' 00:00:00'
+
+
+
+offset = 1
+limit = 10000
+DWH = "dbname='de' port=5432 user=jovyan host=localhost password=jovyan"
+
 ALL_STG_TABLES = ['bonussystem_ranks', 'bonussystem_users', 'bonussystem_events', 'ordersystem_orders', 'ordersystem_restaurants', 'ordersystem_users', 'srv_etl_settings', 'deliveries', 'couriers']
 host='https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/'
+#Заголовки для API
 headers={
-    "X-API-KEY": "25c27781-8fde-4b30-a22e-524044a7580f",
     "X-Nickname": "badasik",
-    "X-Cohort": "7"}
+    "X-Cohort": "7",
+    'X-API-KEY': '25c27781-8fde-4b30-a22e-524044a7580f'
+    }
 
 class MongoConnect:
     def __init__(self,
@@ -65,7 +84,7 @@ connect_to_scr = psycopg2.connect("host=rc1a-1kn18k47wuzaks6h.mdb.yandexcloud.ne
 connect_to_db = psycopg2.connect("host=localhost port=5432 dbname=de user=jovyan password=jovyan")
 
 def check_database(connect_to_db=connect_to_db):
-    Check.check_and_create(connect_to_db, 'stg', ALL_STG_TABLES)
+    check_and_create(connect_to_db, 'stg', ALL_STG_TABLES)
 
 def download_from_postgresql(connect_to_scr, connect_to_db, out_schema, out_table, schema, table, id_column):
     stg_load.download_postgresdata_to_staging(connect_to_scr, connect_to_db, out_schema=out_schema, out_table=out_table, schema=schema, table=table, id_column=id_column)
@@ -73,8 +92,13 @@ def download_from_postgresql(connect_to_scr, connect_to_db, out_schema, out_tabl
 def download_from_mongo(mongo_client, connect_to_db, collection_name, schema, table_name):
     stg_load.download_mongo_to_staging(mongo_client=mongo_client, connect_to_db=connect_to_db, collection_name=collection_name, schema=schema, table_name=table_name)
 
-def download_from_api(connect_to_db, host, headers, schema, table):
-    stg_load.download_api_to_staging(connect_to_db=connect_to_db, host=host, headers=headers, schema=schema, table=table)
+
+#Новые функции для заполнения couriers и deliveries
+def download_couriers(file_api, offset, limit, DWH, current_date_string, yesterday_date_string, headers):
+    stg_load.load_couriers(file_api='couriers', offset=offset, limit=limit, DWH=DWH, current_date_string=current_date_string, yesterday_date_string=yesterday_date_string, headers=headers)
+
+def download_deliveries(file_api, offset, limit, DWH, current_date_string, yesterday_date_string, headers):
+    stg_load.load_deliveries(file_api='deliveries', offset=offset, limit=limit, DWH=DWH, current_date_string=current_date_string, yesterday_date_string=yesterday_date_string, headers=headers)
 
 dag = DAG(
     schedule_interval='* 1 * * *',
@@ -114,14 +138,12 @@ ordersystem_users = PythonOperator(task_id='users',
                                  op_kwargs={'mongo_client':'mongo_client','connect_to_db':connect_to_db, 'collection_name': 'users', 'schema': 'stg', 'table_name': 'ordersystem_users'},
                                  dag=dag)                             
 couriers_load = PythonOperator(task_id='couriers_load',
-                                 python_callable=download_from_api,
-                                 op_kwargs={'connect_to_db':connect_to_db, 'host': 'https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/couriers',
-                                 'headers': headers, 'schema': 'stg', 'table': 'couriers'},
+                                 python_callable=download_couriers,
+                                 op_kwargs={'file_api':'couriers', 'offset': offset, 'limit':limit, 'DWH':DWH, "current_date_string":current_date_string, 'yesterday_date_string':yesterday_date_string, 'headers':headers},
                                  dag=dag)
 delivery_load = PythonOperator(task_id='deliveries_load',
-                                 python_callable=download_from_api,
-                                 op_kwargs={'connect_to_db':connect_to_db, 'host': 'https://d5d04q7d963eapoepsqr.apigw.yandexcloud.net/deliveries',
-                                 'headers': headers, 'schema': 'stg', 'table': 'deliveries'},
+                                 python_callable=download_deliveries,
+                                 op_kwargs={'file_api':'deliveries', 'offset': offset, 'limit':limit, 'DWH':DWH, "current_date_string":current_date_string, 'yesterday_date_string':yesterday_date_string, 'headers':headers},
                                  dag=dag)
 
 check >> [rank_load, users_load, outbox_load, orders_load, ordersystem_users, restaurants_load, couriers_load, delivery_load]
