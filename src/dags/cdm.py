@@ -16,7 +16,7 @@ connect_to_db = psycopg2.connect("host=localhost port=5432 dbname=de user=jovyan
 
 
 today = date.today()
-month_1 = today - timedelta(days=60)
+month_1 = today - timedelta(days=30)
 
 def check_database(connect_to_db=connect_to_db):
     check_and_create(connect_to_db,'cdm', ALL_CDM_TABLES)
